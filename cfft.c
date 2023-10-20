@@ -1,5 +1,4 @@
 #include <math.h>
-#include <stdio.h>
 #include "cfft.h"
 
 
@@ -15,7 +14,10 @@ static int cfft_clz(unsigned x)
 #if __GNUC__
     res = __builtin_clz(x);
 #elif MSC_VER
+    /* This will not compile under MSVC in a million years */
     res = __lzcnt(x);
+#else
+    /* Software emulation? */
 #endif
     return res;
 }
@@ -34,8 +36,21 @@ static int cfft_popcount(unsigned x)
     res = __builtin_popcount(x);
 #elif MSC_VER
     res = __popcnt(x);
+#else
+    /* Software emulation? */
 #endif
     return res;
+}
+
+
+/** @brief Determine if @p x is a power of two
+ *  @param x
+ *      Test value
+ *  @returns Nonzero if @p x represents a power of two
+ */
+static int cfft_ispow2(unsigned x)
+{
+    return cfft_popcount(x) == 1;
 }
 
 
@@ -111,8 +126,9 @@ static unsigned cfft_reverse(unsigned x)
     union {
         unsigned char byte[4];
         unsigned      word;
-    } u = { .word = x };
+    } u;
 
+    u.word = x;
     u.byte[0] = byte_reverse(u.byte[0]);
     u.byte[1] = byte_reverse(u.byte[1]);
     u.byte[2] = byte_reverse(u.byte[2]);
@@ -138,6 +154,25 @@ static void cfft_reorder(unsigned len, complex double data[])
         j = cfft_reverse(i) >> shift;
         j = (j < i) ? j : i;
         complexswap(&data[i], &data[j]);
+    }
+}
+
+
+/** @brief Reorder @p data into its bit-reversal permutation, using a stride
+ *  @param len
+ *      Length of @p data
+ *  @param data
+ *      Input data in "natural order"
+ */
+static void cfft2_reorder(unsigned len, complex double data[], unsigned stride)
+{
+    unsigned shift, i, j;
+
+    shift = cfft_clz(len) + 1;
+    for (i = 0; i < len; i++) {
+        j = cfft_reverse(i) >> shift;
+        j = (j < i) ? j : i;
+        complexswap(&data[i * stride], &data[j * stride]);
     }
 }
 
@@ -192,19 +227,32 @@ static void cfft_reduce(unsigned       len,
 }
 
 
-int cfft_compute(unsigned len, complex double data[])
+/** @brief Carry out the forward transform, knowing that @p len is a power of
+ *      two
+ *  @param len
+ *      Length of @p data
+ *  @param data
+ *      Input data
+ */
+static void cfft_forward(unsigned len, complex double data[])
 {
     complex double princip;
     unsigned cur;
 
-    if (cfft_popcount(len) != 1) {
-        return -1;  /* you THOUGHT */
-    }
     cfft_reorder(len, data);
     for (cur = 2; cur <= len; cur *= 2) {
         princip = root_of_unity(-(int)cur);
         cfft_reduce(len, data, princip, cur);
     }
+}
+
+
+int cfft_compute(unsigned len, complex double data[])
+{
+    if (!cfft_ispow2(len)) {
+        return -1;  /* you THOUGHT */
+    }
+    cfft_forward(len, data);
     return 0;
 }
 
@@ -226,19 +274,109 @@ static void cfft_normalize(unsigned len, complex double data[])
 }
 
 
-int cfft_inverse(unsigned len, complex double data[])
+/** @brief Carry out the inverse transform, knowing that @p len is a power of
+ *      two
+ *  @param len
+ *      Length of @p data
+ *  @param data
+ *      Input data
+ */
+static void cfft_backward(unsigned len, complex double data[])
 {
     complex double princip;
     unsigned cur;
 
-    if (cfft_popcount(len) != 1) {
-        return -1;
-    }
     cfft_reorder(len, data);
     for (cur = 2; cur <= len; cur *= 2) {
         princip = root_of_unity(cur);
         cfft_reduce(len, data, princip, cur);
     }
+}
+
+
+int cfft_inverse(unsigned len, complex double data[])
+{
+    if (!cfft_ispow2(len)) {
+        return -1;
+    }
+    cfft_backward(len, data);
     cfft_normalize(len, data);
+    return 0;
+}
+
+
+/** @brief Reduce an entire row of recursion size @p cur using the Danielson-
+ *      Lanczos lemma, using a stride
+ *  @param len
+ *      Input data buffer size
+ *  @param data
+ *      Data buffer
+ *  @param princip
+ *      Principal root of unity for this recursion level
+ *  @param cur
+ *      Current size of each Danielson-Lanczos block
+ *  @param stride
+ *      Distance between "adjacent" datapoints
+ */
+static void cfft2_reduce(unsigned       len,
+                         complex double data[],
+                         complex double princip,
+                         unsigned       cur,
+                         unsigned       stride)
+{
+    const unsigned half = stride * (cur / 2);
+    complex double twiddle, *offs, even, odd;
+    unsigned skip, i;
+
+    for (skip = 0; skip < len; skip += cur) {
+        twiddle = 1.0;
+        offs = data + skip * stride;
+        for (i = 0; i < half; i += stride) {
+            even = offs[i];
+            odd = twiddle * offs[half + i];
+            offs[i] = even + odd;
+            offs[half + i] = even - odd;
+            twiddle *= princip;
+        }
+    }
+}
+
+
+/** @brief Perform a strided FFT
+ *  @param len
+ *      Power-of-two length of @p data, accounting for @p stride
+ *  @param data
+ *      Input/output data
+ *  @param stride
+ *      The difference between "adjacent" datapoints
+ */
+static void cfft2_forward(unsigned len, complex double data[], unsigned stride)
+/** The stride is a power of two. This may be useful */
+{
+    complex double princip;
+    unsigned cur;
+
+    cfft2_reorder(len, data, stride);
+    for (cur = 2; cur <= len; cur *= 2) {
+        princip = root_of_unity(-(int)cur);
+        cfft2_reduce(len, data, princip, cur, stride);
+    }
+}
+
+
+int cfft2_compute(const unsigned dim[], complex double data[])
+{
+    unsigned row, col, offs = 0;
+
+    if (!cfft_ispow2(dim[0]) || !cfft_ispow2(dim[1])) {
+        return -1;
+    }
+    for (row = 0; row < dim[1]; row++) {
+        cfft_forward(dim[0], &data[offs]);
+        offs += dim[0];
+    }
+    for (col = 0; col < dim[0]; col++) {
+        cfft2_forward(dim[1], &data[col], dim[0]);
+    }
     return 0;
 }
