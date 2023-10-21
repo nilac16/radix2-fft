@@ -34,7 +34,8 @@ int cfft_inverse(unsigned len, complex double data[]);
  *      Dimensions of @p data as the pair (width, height). These must both be
  *      powers of two---zero pad rows and columns to ensure this
  *  @param data
- *      The data in a single linear array. The output is written here
+ *      The data in a single linear array, in *row-major* order. The output is
+ *      also written here
  *  @returns Zero on success, -1 if @p dim does not contain powers of two
  */
 int cfft2_compute(const unsigned dim[], complex double data[]);
@@ -62,7 +63,8 @@ void cfft_shift(unsigned len, complex double data[]);
  *      even. If a dimension is not even, the middle element will not be moved
  *  @param data
  *      Data buffer
- *  @note Again, this operation is an involution
+ *  @note Again, this operation is an involution. You do not need to save
+ *      @p data before calling this, as another call will restore it
  */
 void cfft2_shift(const unsigned dim[], complex double data[]);
 
@@ -73,16 +75,7 @@ void cfft2_shift(const unsigned dim[], complex double data[]);
  *      Test value
  *  @returns The first power of two not less than @p x
  */
-static inline unsigned cfft_next_pow2(unsigned x)
-{
-    x--;
-    x |= (x >> 1);
-    x |= (x >> 2);
-    x |= (x >> 4);
-    x |= (x >> 8);
-    x |= (x >> 16);
-    return x + 1;
-}
+unsigned cfft_next_pow2(unsigned x);
 
 
 #endif /* CFFT_H */

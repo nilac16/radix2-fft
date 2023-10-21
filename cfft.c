@@ -121,7 +121,7 @@ static void complexswap(complex double *c1, complex double *c2)
  *      Integer to reverse
  *  @returns The reverse of @p x
  */
-static unsigned cfft_reverse(unsigned x)
+static unsigned cfft_reverse_int(unsigned x)
 {
     union {
         unsigned char byte[4];
@@ -151,28 +151,9 @@ static void cfft_reorder(unsigned len, complex double data[])
 
     shift = cfft_clz(len) + 1;
     for (i = 0; i < len; i++) {
-        j = cfft_reverse(i) >> shift;
+        j = cfft_reverse_int(i) >> shift;
         j = (j < i) ? j : i;
         complexswap(&data[i], &data[j]);
-    }
-}
-
-
-/** @brief Reorder @p data into its bit-reversal permutation, using a stride
- *  @param len
- *      Length of @p data
- *  @param data
- *      Input data in "natural order"
- */
-static void cfft2_reorder(unsigned len, complex double data[], unsigned stride)
-{
-    unsigned shift, i, j;
-
-    shift = cfft_clz(len) + 1;
-    for (i = 0; i < len; i++) {
-        j = cfft_reverse(i) >> shift;
-        j = (j < i) ? j : i;
-        complexswap(&data[i * stride], &data[j * stride]);
     }
 }
 
@@ -305,83 +286,6 @@ int cfft_inverse(unsigned len, complex double data[])
 }
 
 
-/** @brief Reduce an entire row of recursion size @p cur using the Danielson-
- *      Lanczos lemma, using a stride
- *  @param len
- *      Input data buffer size
- *  @param data
- *      Data buffer
- *  @param princip
- *      Principal root of unity for this recursion level
- *  @param cur
- *      Current size of each Danielson-Lanczos block
- *  @param stride
- *      Distance between "adjacent" datapoints
- */
-static void cfft2_reduce(unsigned       len,
-                         complex double data[],
-                         complex double princip,
-                         unsigned       cur,
-                         unsigned       stride)
-{
-    const unsigned half = stride * (cur / 2);
-    complex double twiddle, *offs, even, odd;
-    unsigned skip, i;
-
-    for (skip = 0; skip < len; skip += cur) {
-        twiddle = 1.0;
-        offs = data + skip * stride;
-        for (i = 0; i < half; i += stride) {
-            even = offs[i];
-            odd = twiddle * offs[half + i];
-            offs[i] = even + odd;
-            offs[half + i] = even - odd;
-            twiddle *= princip;
-        }
-    }
-}
-
-
-/** @brief Perform a strided FFT
- *  @param len
- *      Power-of-two length of @p data, accounting for @p stride
- *  @param data
- *      Input/output data
- *  @param stride
- *      The difference between "adjacent" datapoints
- */
-static void cfft2_forward(unsigned len, complex double data[], unsigned stride)
-/** The stride is a power of two. This may be useful */
-{
-    complex double princip;
-    unsigned cur;
-
-    cfft2_reorder(len, data, stride);
-    for (cur = 2; cur <= len; cur *= 2) {
-        princip = root_of_unity(-(int)cur);
-        cfft2_reduce(len, data, princip, cur, stride);
-    }
-}
-
-
-int cfft2_compute(const unsigned dim[], complex double data[])
-{
-    unsigned row, col, offs = 0;
-
-    if (!cfft_ispow2(dim[0]) || !cfft_ispow2(dim[1])) {
-        return -1;
-    }
-    for (row = 0; row < dim[1]; row++) {
-        cfft_forward(dim[0], &data[offs]);
-        offs += dim[0];
-    }
-    for (col = 0; col < dim[0]; col++) {
-        cfft2_forward(dim[1], &data[col], dim[0]);
-    }
-    return 0;
-}
-
-
 /** @brief Swap lines @p l1 and @p l2
  *  @param len
  *      Line length
@@ -390,13 +294,165 @@ int cfft2_compute(const unsigned dim[], complex double data[])
  *  @param l2
  *      Pointer to line 2
  */
-static void cfft_swap_lines(unsigned len, complex double *l1, complex double *l2)
+static void cfft_swap_lines(unsigned        len,
+                            complex double *l1,
+                            complex double *l2)
 {
+    /* complex double buf[1024];
+    const size_t buflen = sizeof buf / sizeof *buf;
+    size_t cklen, cksiz;
+
+    while (len) {
+        cklen = (buflen < len) ? buflen : len;
+        cksiz = sizeof *buf * cklen;
+        memcpy(buf, l1, cksiz);
+        memcpy(l1, l2, cksiz);
+        memcpy(l2, buf, cksiz);
+        l1 += cklen;
+        l2 += cklen;
+        len -= cklen;
+    } */
     unsigned i;
 
     for (i = 0; i < len; i++) {
         complexswap(&l1[i], &l2[i]);
     }
+}
+
+
+/** @brief Transpose a square matrix
+ *  @param dim
+ *      Dimensions of the full data matrix
+ *  @param data
+ *      Data matrix
+ *  @param x
+ *      Column coordinate to the top-left of the submatrix
+ *  @param y
+ *      Row coordinate to the top-left of the submatrix
+ *  @param size
+ *      Side length of the matrix
+ */
+static void cfft_transpose_small(const unsigned dim[],
+                                 complex double data[],
+                                 unsigned       x,
+                                 unsigned       y,
+                                 unsigned       size)
+{
+    complex double *start = data + y * dim[0] + x, *line, *col;
+    unsigned i, j;
+
+    for (j = 0; j < size; j++) {
+        line = start + j * dim[0];
+        col = start + j;
+        for (i = j + 1; i < size; i++) {
+            complexswap(&line[i], &col[i * dim[0]]);
+        }
+    }
+}
+
+
+/** @brief Transpose a square component of @p data
+ *  @param dim
+ *      Dimensions of @p data, must be powers of two
+ *  @param data
+ *      Data buffer
+ *  @param x
+ *      Column coordinate of the top-left corner of the submatrix
+ *  @param y
+ *      Row coordinate of the top-left corner of the submatrix
+ *  @param size
+ *      Side length of the submatrix, must be a power of two
+ */
+static void cfft_transpose_square(const unsigned dim[],
+                                  complex double data[],
+                                  unsigned       x,
+                                  unsigned       y,
+                                  unsigned       size)
+/** Cut M into quarters
+ *          | A  B |
+ *      M = | C  D |
+ *  and swap the off-diagonal entries
+ *          | A  C |
+ *     M' = | B  D |
+ *  then recurse on each submatrix
+ */
+{
+    const unsigned lowlim = 4;  /* Use the naive algorithm below this size */
+    const unsigned half = size / 2;
+    const unsigned xmid = x + half, ymid = y + half;
+    complex double *A = data + y * dim[0] + x;
+    complex double *B = A + half;
+    complex double *C = A + half * dim[0];
+    unsigned row, offs = 0;
+    
+    if (size > lowlim) {
+        for (row = 0; row < half; row++) {
+            cfft_swap_lines(half, &B[offs], &C[offs]);
+            offs += dim[0];
+        }
+        cfft_transpose_square(dim, data, x,    y,    half);
+        cfft_transpose_square(dim, data, xmid, y,    half);
+        cfft_transpose_square(dim, data, x,    ymid, half);
+        cfft_transpose_square(dim, data, xmid, ymid, half);
+    } else {
+        cfft_transpose_small(dim, data, x, y, size);
+    }
+}
+
+
+/** @brief Transpose @p data
+ *  @param dim
+ *      Power-of-two dimensions
+ *  @param data
+ *      Matrix array
+ */
+static void cfft_transpose(const unsigned dim[], complex double data[])
+/** Since the dimensions are only powers of two, cut the larger in half until
+ *  you are left with square matrices, then apply block transposition
+ */
+{
+    unsigned org[2] = { 0 }, size;
+    int idx;
+
+    size = (dim[0] < dim[1]) ? dim[0] : dim[1];
+    idx = (dim[0] < dim[1]) ? 1 : 0;
+    for (org[idx] = 0; org[idx] < dim[idx]; org[idx] += size) {
+        cfft_transpose_square(dim, data, org[0], org[1], size);
+    }
+}
+
+
+/** @brief Apply the one-dimensional FFT to each row in @p data
+ *  @param cols
+ *      Number of columns
+ *  @param rows
+ *      Number of rows
+ *  @param data
+ *      Data buffer
+ */
+static void cfft2_forward_rows(unsigned       cols,
+                               unsigned       rows,
+                               complex double data[])
+{
+    unsigned row, offs = 0;
+
+    for (row = 0; row < rows; row++) {
+        cfft_forward(cols, &data[offs]);
+        offs += cols;
+    }
+}
+
+
+int cfft2_compute(const unsigned dim[], complex double data[])
+{
+    if (!cfft_ispow2(dim[0]) || !cfft_ispow2(dim[1])) {
+        return -1;
+    }
+    cfft2_forward_rows(dim[0], dim[1], data);
+    cfft_transpose(dim, data);
+    cfft2_forward_rows(dim[1], dim[0], data);
+    cfft_transpose(dim, data);
+    return 0;
 }
 
 
@@ -424,4 +480,16 @@ void cfft2_shift(const unsigned dim[], complex double data[])
         line += dim[0];
         lower += dim[0];
     }
+}
+
+
+unsigned cfft_next_pow2(unsigned x)
+{
+    x--;
+    x |= (x >> 1);
+    x |= (x >> 2);
+    x |= (x >> 4);
+    x |= (x >> 8);
+    x |= (x >> 16);
+    return x + 1;
 }
