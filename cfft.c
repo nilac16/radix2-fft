@@ -380,3 +380,48 @@ int cfft2_compute(const unsigned dim[], complex double data[])
     }
     return 0;
 }
+
+
+/** @brief Swap lines @p l1 and @p l2
+ *  @param len
+ *      Line length
+ *  @param l1
+ *      Pointer to line 1
+ *  @param l2
+ *      Pointer to line 2
+ */
+static void cfft_swap_lines(unsigned len, complex double *l1, complex double *l2)
+{
+    unsigned i;
+
+    for (i = 0; i < len; i++) {
+        complexswap(&l1[i], &l2[i]);
+    }
+}
+
+
+void cfft_shift(unsigned len, complex double data[])
+/** Allowing odd lengths turns this into the classic array rotation problem, but
+ *  prevents it from being an involution
+ */
+{
+    const unsigned l = len / 2, r = (len + 1) / 2;
+
+    cfft_swap_lines(l, data, data + r);
+}
+
+
+void cfft2_shift(const unsigned dim[], complex double data[])
+{
+    const unsigned l = dim[0] / 2, r = (dim[0] + 1) / 2;
+    const unsigned u = dim[1] / 2, b = (dim[1] + 1) / 2;
+    complex double *lower = data + b * dim[0], *line = data;
+    unsigned row;
+
+    for (row = 0; row < u; row++) {
+        cfft_swap_lines(l, line,     lower + r);
+        cfft_swap_lines(l, line + r, lower);
+        line += dim[0];
+        lower += dim[0];
+    }
+}
