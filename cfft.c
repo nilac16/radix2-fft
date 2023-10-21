@@ -1,3 +1,4 @@
+#include <stdbool.h>
 #include <math.h>
 #include "cfft.h"
 
@@ -48,7 +49,7 @@ static int cfft_popcount(unsigned x)
  *      Test value
  *  @returns Nonzero if @p x represents a power of two
  */
-static int cfft_ispow2(unsigned x)
+static bool cfft_ispow2(unsigned x)
 {
     return cfft_popcount(x) == 1;
 }
@@ -167,7 +168,7 @@ static void cfft_reorder(unsigned len, complex double data[])
  */
 static complex double root_of_unity(int size)
 {
-    const double pi = 3.141592653589793, twopi = 2.0 * pi;
+    const double pi = 3.14159265358979323846, twopi = 2.0 * pi;
     double arg = twopi / (double)size;
 
     return cos(arg) + sin(arg) * I;
@@ -298,20 +299,6 @@ static void cfft_swap_lines(unsigned        len,
                             complex double *l1,
                             complex double *l2)
 {
-    /* complex double buf[1024];
-    const size_t buflen = sizeof buf / sizeof *buf;
-    size_t cklen, cksiz;
-
-    while (len) {
-        cklen = (buflen < len) ? buflen : len;
-        cksiz = sizeof *buf * cklen;
-        memcpy(buf, l1, cksiz);
-        memcpy(l1, l2, cksiz);
-        memcpy(l2, buf, cksiz);
-        l1 += cklen;
-        l2 += cklen;
-        len -= cklen;
-    } */
     unsigned i;
 
     for (i = 0; i < len; i++) {
@@ -384,7 +371,7 @@ static void cfft_transpose_square(const unsigned dim[],
     complex double *B = A + half;
     complex double *C = A + half * dim[0];
     unsigned row, offs = 0;
-    
+
     if (size > lowlim) {
         for (row = 0; row < half; row++) {
             cfft_swap_lines(half, &B[offs], &C[offs]);
@@ -400,7 +387,7 @@ static void cfft_transpose_square(const unsigned dim[],
 }
 
 
-/** @brief Transpose @p data
+/** @brief Transpose @p data in-place with no extra (heap) memory
  *  @param dim
  *      Power-of-two dimensions
  *  @param data
