@@ -456,6 +456,41 @@ int cfft2_compute(const unsigned dim[], complex double data[])
 }
 
 
+/** @brief Apply the _inverse_ one-dimensional FFT to each row in @p data
+ *  @param cols
+ *      Number of columns
+ *  @param rows
+ *      Number of rows
+ *  @param data
+ *      Data buffer
+ */
+static void cfft2_backward_rows(unsigned       cols,
+                                unsigned       rows,
+                                complex double data[])
+{
+    unsigned row, offs = 0;
+
+    for (row = 0; row < rows; row++) {
+        cfft_backward(cols, &data[offs]);
+        offs += cols;
+    }
+}
+
+
+int cfft2_inverse(const unsigned dim[], complex double data[])
+{
+    if (!cfft_ispow2(dim[0]) || !cfft_ispow2(dim[1])) {
+        return -1;
+    }
+    cfft2_backward_rows(dim[0], dim[1], data);
+    cfft_transpose(dim, data);
+    cfft2_backward_rows(dim[1], dim[0], data);
+    cfft_transpose(dim, data);
+    cfft_normalize(dim[0] * dim[1], data);
+    return 0;
+}
+
+
 void cfft_shift(unsigned len, complex double data[])
 /** Allowing odd lengths turns this into the classic array rotation problem, but
  *  prevents it from being an involution

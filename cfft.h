@@ -41,6 +41,16 @@ int cfft_inverse(unsigned len, complex double data[]);
 int cfft2_compute(const unsigned dim[], complex double data[]);
 
 
+/** @brief Compute the inverse two-dimensional fast Fourier transform of @p data
+ *  @param dim
+ *      Column, row dimensions of @p data. These must be powers of two
+ *  @param data
+ *      Row-major input data and row-major output data
+ *  @returns Zero on success, -1 if @p dim does not contain powers of two
+ */
+int cfft2_inverse(const unsigned dim[], complex double data[]);
+
+
 /** @brief Swap the left and right halves of @p data to move the zero-frequency
  *      component to the halfway point
  *  @param len
