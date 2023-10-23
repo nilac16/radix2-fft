@@ -23,3 +23,12 @@ Applying a small rectangular notch filter to eliminate DC and low-frequency comp
 | Notch filter  | Inverse FFT2  |
 |             - | -             |
 | ![][filterid] | ![][inversid] |
+
+
+---
+
+And the one-dimensional example that everybody's seen before---Fetching signal frequencies that are buried in noise:
+
+[signalid]: /images/signal.png
+
+![][signalid]
